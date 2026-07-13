@@ -61,10 +61,13 @@ def train():
     with mlflow.start_run():
         params = dict(
             objective="binary",
+            metric="auc",
             scale_pos_weight=scale_pos_weight,
             n_estimators=1000,
             learning_rate=0.05,
-            num_leaves=64,
+            num_leaves=31,
+            reg_alpha=0.1,
+            reg_lambda=0.1,
             random_state=42,
         )
         mlflow.log_params(params)
@@ -74,7 +77,7 @@ def train():
             X_train, y_train,
             eval_set=[(X_val, y_val)],
             eval_metric="auc",
-            callbacks=[lgb.early_stopping(50), lgb.log_evaluation(100)],
+           callbacks=[lgb.early_stopping(100), lgb.log_evaluation(100)],
         )
 
         val_proba = model.predict_proba(X_val)[:, 1]
