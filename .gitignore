@@ -30,3 +30,5 @@ mlruns/
 # OS
 .DS_Store
 Thumbs.db
+mlflow.db
+mlruns/
