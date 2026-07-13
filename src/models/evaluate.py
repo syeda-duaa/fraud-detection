@@ -11,11 +11,15 @@ import pandas as pd
 import lightgbm as lgb
 from sklearn.metrics import precision_recall_curve, average_precision_score, confusion_matrix
 
+from src.features.build_features import build_feature_pipeline
+from src.models.train import time_based_split, get_feature_columns
+
+INTERIM_DIR = Path(__file__).resolve().parents[2] / "data" / "interim"
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
 
 # adjust these to whatever your writeup argues for
-COST_FALSE_NEGATIVE = 500  # missed fraud
-COST_FALSE_POSITIVE = 5    # blocked legitimate transaction, customer friction
+COST_FALSE_NEGATIVE = 200  # missed fraud
+COST_FALSE_POSITIVE = 20    # blocked legitimate transaction, customer friction
 
 
 def evaluate_at_thresholds(y_true, y_proba, thresholds=None):
@@ -42,7 +46,30 @@ def find_best_threshold(y_true, y_proba) -> float:
     return best_row["threshold"]
 
 
-def main(X_val, y_val):
+def load_validation_set():
+    """
+    Rebuilds the exact same validation split and features used in training.
+    Kept identical to train.py on purpose, mismatched preprocessing between
+    training and evaluation is its own quiet leakage/bug source.
+    """
+    df = pd.read_parquet(INTERIM_DIR / "train_merged.parquet")
+    train_df, val_df = time_based_split(df)
+
+    train_df = build_feature_pipeline(train_df, ref_df=train_df)
+    val_df = build_feature_pipeline(val_df, ref_df=train_df)
+
+    feature_cols = get_feature_columns(train_df)
+    cat_cols = [c for c in feature_cols if val_df[c].dtype == "object"]
+    for c in cat_cols:
+        val_df[c] = val_df[c].astype("category")
+
+    return val_df[feature_cols], val_df["isFraud"]
+
+
+def main(X_val=None, y_val=None):
+    if X_val is None or y_val is None:
+        X_val, y_val = load_validation_set()
+
     model = lgb.Booster(model_file=str(MODELS_DIR / "fraud_model.txt"))
     y_proba = model.predict(X_val)
 
@@ -55,7 +82,8 @@ def main(X_val, y_val):
     best_threshold = find_best_threshold(y_val, y_proba)
     print(f"\nCost-minimizing threshold: {best_threshold:.2f}")
 
+    return results, best_threshold
+
 
 if __name__ == "__main__":
-    # load your validation set here and call main(X_val, y_val)
-    print("Import and call main(X_val, y_val) with your validation data.")
+    main()

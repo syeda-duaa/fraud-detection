@@ -12,7 +12,7 @@ import lightgbm as lgb
 from src.features.build_features import build_feature_pipeline
 
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
-THRESHOLD = 0.5  # replace with your cost-minimizing threshold from evaluate.py
+THRESHOLD = 0.22
 
 app = FastAPI(title="Fraud Detection API")
 model = None
