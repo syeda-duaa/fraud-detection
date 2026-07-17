@@ -4,6 +4,7 @@ Train a LightGBM fraud classifier with a time-based split and MLflow tracking.
 Usage:
     python -m src.models.train
 """
+import json
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -12,7 +13,7 @@ import mlflow
 import mlflow.lightgbm
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from src.features.build_features import build_feature_pipeline
+from src.features.build_features import build_feature_pipeline, save_card_reference
 
 INTERIM_DIR = Path(__file__).resolve().parents[2] / "data" / "interim"
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
@@ -42,6 +43,10 @@ def train():
 
     train_df, val_df = time_based_split(df)
 
+    # save card-level stats from the training split so the API can use them
+    # at serving time, without this, aggregate features are NaN for every request
+    save_card_reference(train_df, MODELS_DIR / "card_reference.parquet")
+
     # compute card aggregates on train only, then apply to both splits
     train_df = build_feature_pipeline(train_df, ref_df=train_df)
     val_df = build_feature_pipeline(val_df, ref_df=train_df)
@@ -51,6 +56,16 @@ def train():
     for c in cat_cols:
         train_df[c] = train_df[c].astype("category")
         val_df[c] = val_df[c].astype("category")
+
+    # save the exact schema the model expects, so the API can build a
+    # matching row from a partial request instead of crashing on shape mismatch
+    schema = {
+        "feature_cols": feature_cols,
+        "categorical_cols": {c: train_df[c].cat.categories.tolist() for c in cat_cols},
+    }
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(MODELS_DIR / "feature_schema.json", "w") as f:
+        json.dump(schema, f)
 
     X_train, y_train = train_df[feature_cols], train_df["isFraud"]
     X_val, y_val = val_df[feature_cols], val_df["isFraud"]
@@ -77,7 +92,7 @@ def train():
             X_train, y_train,
             eval_set=[(X_val, y_val)],
             eval_metric="auc",
-           callbacks=[lgb.early_stopping(100), lgb.log_evaluation(100)],
+            callbacks=[lgb.early_stopping(100), lgb.log_evaluation(100)],
         )
 
         val_proba = model.predict_proba(X_val)[:, 1]
@@ -91,7 +106,6 @@ def train():
         print(f"Validation AUC-PR: {auc_pr:.4f}")
         print(f"Validation AUC-ROC: {auc_roc:.4f}")
 
-        MODELS_DIR.mkdir(parents=True, exist_ok=True)
         model.booster_.save_model(str(MODELS_DIR / "fraud_model.txt"))
         print(f"Model saved to {MODELS_DIR / 'fraud_model.txt'}")
 
