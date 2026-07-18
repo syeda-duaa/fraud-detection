@@ -9,7 +9,8 @@ data/processed/*
 # Models
 models/*
 !models/.gitkeep
-
+!models/explainability/
+!models/explainability/*.png
 # Python
 __pycache__/
 *.py[cod]
