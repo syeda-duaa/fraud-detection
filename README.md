@@ -64,9 +64,12 @@ explained in terms of real-world meaning, that's a constraint of this
 dataset, not the analysis.
 
 ## Setup (Windows / Anaconda)
+
+```
 conda create -n fraud-detection python=3.10
 conda activate fraud-detection
 pip install -r requirements.txt
+```
 
 ## Get the data
 
