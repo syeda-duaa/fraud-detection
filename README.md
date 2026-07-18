@@ -1,22 +1,69 @@
 # Fraud Detection System
 
 Fraud classifier built on the IEEE-CIS Fraud Detection dataset, with a
-time-based validation split, cost-based threshold selection, and a served
-API endpoint.
+time-based validation split, cost-based threshold selection, SHAP
+explainability, and a containerized serving API.
+
+## Results
+
+**Model**: LightGBM, time-based train/validation split (random splits leak
+future information into validation on this dataset)
+
+| Metric | Score |
+|---|---|
+| AUC-PR (validation) | 0.5216 |
+| AUC-ROC (validation) | 0.9079 |
+
+AUC-PR is the primary metric here, not AUC-ROC, since fraud is ~3.5% of
+transactions and ROC-AUC is flattered by the large number of easy true
+negatives.
+
+### A metric mismatch that quietly hid the model's real performance
+
+Early runs used `eval_metric="auc"` in `.fit()` but didn't set `metric` in
+the LightGBM params themselves. LightGBM tracked both AUC and logloss under
+the hood, and early stopping picked the best iteration by logloss, not AUC.
+The result: training stopped at round 1 every time, with logloss looking
+great but the model barely trained. AUC-PR sat at 0.2538. Explicitly setting
+`metric="auc"` in the params fixed it, best iteration moved to round 288,
+and AUC-PR jumped to 0.5216, more than double. Full details in `src/models/train.py`.
+
+### Cost sensitivity: the "right" threshold depends on the business
+
+Using `src/models/cost_sensitivity.py`, the cost-minimizing decision
+threshold was computed under five different assumptions about the relative
+cost of a missed fraud vs. a false alarm:
+
+| Scenario | Cost ratio (FN:FP) | Best threshold | Precision | Recall |
+|---|---|---|---|---|
+| High-value fraud (e.g. wire transfers) | 200:1 | 0.10 | 0.057 | 0.965 |
+| Baseline | 100:1 | 0.20 | 0.090 | 0.913 |
+| Higher friction cost | 25:1 | 0.35 | 0.149 | 0.836 |
+| Lower-value fraud / strict CX | 10:1 | 0.65 | 0.329 | 0.636 |
+
+The optimal threshold ranges from 0.10 to 0.65 depending entirely on how
+costly a missed fraud is assumed to be relative to a false alarm. Notably,
+the two scenarios with the same 10:1 ratio (`200,20` and `500,50`) landed on
+the identical threshold, confirming the optimizer responds to the *ratio*
+of costs, not their absolute values. Full table: `cost_sensitivity_results.csv`.
+
+### What actually drives the model (SHAP)
+
+![SHAP summary](models/explainability/shap_summary.png)
+
+The single most important feature in the entire 439-column model is
+`card1_amt_mean`, a custom aggregate (average transaction amount per card)
+built in `src/features/build_features.py`, ranked above every one of
+Vesta's own anonymized features. `card1_txn_count` and `day` (also
+engineered) placed in the top 10. This is a directly measurable case
+where feature engineering outperformed the dataset's built-in signals.
+
+Limitation worth noting: most of Vesta's raw features (`C13`, `V70`, `C14`,
+etc.) are anonymized, so their SHAP importance can be ranked but not
+explained in terms of real-world meaning, that's a constraint of this
+dataset, not the analysis.
 
 ## Setup (Windows / Anaconda)
-
-```
-conda create -n fraud-detection python=3.10
-conda activate fraud-detection
-pip install -r requirements.txt
-```
-
-## Get the data
-
-1. Accept the competition rules at https://www.kaggle.com/c/ieee-fraud-detection
-2. Download `train_transaction.csv`, `train_identity.csv`, `test_transaction.csv`, `test_identity.csv`
-3. Place all four files in `data/raw/`
 
 ## Run the pipeline
 
